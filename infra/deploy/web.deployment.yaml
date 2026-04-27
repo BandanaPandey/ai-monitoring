@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/example/ai-monitoring-web:latest
+          ports:
+            - containerPort: 5173
+          env:
+            - name: VITE_GATEWAY_API_URL
+              value: http://gateway-api:8000

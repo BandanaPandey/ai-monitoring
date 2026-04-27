@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: processor
+  template:
+    metadata:
+      labels:
+        app: processor
+    spec:
+      containers:
+        - name: processor
+          image: ghcr.io/example/ai-monitoring-processor:latest
+          env:
+            - name: PROCESSOR_MODE
+              value: file
+            - name: PROCESSOR_FILE_STORE_PATH
+              value: /app/var/data/logs.jsonl
+            - name: PROCESSOR_AGGREGATE_STORE_PATH
+              value: /app/var/data/aggregates.json
+

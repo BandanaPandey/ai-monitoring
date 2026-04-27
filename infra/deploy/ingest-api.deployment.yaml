@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingest-api
+  template:
+    metadata:
+      labels:
+        app: ingest-api
+    spec:
+      containers:
+        - name: ingest-api
+          image: ghcr.io/example/ai-monitoring-ingest-api:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: INGEST_STORAGE_BACKEND
+              value: file
+            - name: INGEST_FILE_STORE_PATH
+              value: /app/var/data/logs.jsonl
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+

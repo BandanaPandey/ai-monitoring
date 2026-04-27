@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway-api
+  template:
+    metadata:
+      labels:
+        app: gateway-api
+    spec:
+      containers:
+        - name: gateway-api
+          image: ghcr.io/example/ai-monitoring-gateway-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: GATEWAY_STORAGE_BACKEND
+              value: file
+            - name: GATEWAY_FILE_STORE_PATH
+              value: /app/var/data/logs.jsonl
+            - name: GATEWAY_AGGREGATE_STORE_PATH
+              value: /app/var/data/aggregates.json
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+

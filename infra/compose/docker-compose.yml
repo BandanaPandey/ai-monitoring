@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aimonitor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+  ingest-api:
+    build:
+      context: ../..
+      dockerfile: services/ingest-api/Dockerfile
+    environment:
+      INGEST_API_KEYS: demo-ingest-key
+      INGEST_STORAGE_BACKEND: file
+      INGEST_FILE_STORE_PATH: /app/var/data/logs.jsonl
+      INGEST_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
+      INGEST_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
+    volumes:
+      - shared-data:/app/var/data
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - clickhouse
+
+  gateway-api:
+    build:
+      context: ../..
+      dockerfile: services/gateway-api/Dockerfile
+    environment:
+      GATEWAY_STORAGE_BACKEND: file
+      GATEWAY_FILE_STORE_PATH: /app/var/data/logs.jsonl
+      GATEWAY_AGGREGATE_STORE_PATH: /app/var/data/aggregates.json
+      GATEWAY_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
+      GATEWAY_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
+      GATEWAY_AUTH_EMAIL: admin@example.com
+      GATEWAY_AUTH_PASSWORD: changeme
+      GATEWAY_AUTH_SECRET: local-dev-secret
+    volumes:
+      - shared-data:/app/var/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - clickhouse
+
+  processor:
+    build:
+      context: ../..
+      dockerfile: services/processor/Dockerfile
+    environment:
+      PROCESSOR_MODE: file
+      PROCESSOR_FILE_STORE_PATH: /app/var/data/logs.jsonl
+      PROCESSOR_AGGREGATE_STORE_PATH: /app/var/data/aggregates.json
+      PROCESSOR_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
+      PROCESSOR_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
+    volumes:
+      - shared-data:/app/var/data
+    depends_on:
+      - ingest-api
+
+  web:
+    build:
+      context: ../..
+      dockerfile: services/web/Dockerfile
+    environment:
+      VITE_GATEWAY_API_URL: http://gateway-api:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - gateway-api
+
+volumes:
+  postgres-data:
+  clickhouse-data:
+  shared-data:
+

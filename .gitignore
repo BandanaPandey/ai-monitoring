@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.local
+.pytest_cache/
+.pycache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+node_modules/
+coverage/
+htmlcov/
+.mypy_cache/
+build/

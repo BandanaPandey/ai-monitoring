@@ -1,0 +1,13 @@
+{
+  "name": "ai-monitoring-platform",
+  "private": true,
+  "workspaces": [
+    "services/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace services/web run dev",
+    "build:web": "npm --workspace services/web run build",
+    "test:web": "npm --workspace services/web run test"
+  }
+}
+
