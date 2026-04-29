@@ -19,7 +19,7 @@ class Settings:
             clickhouse_dsn=os.getenv("PROCESSOR_CLICKHOUSE_DSN", ""),
             postgres_dsn=os.getenv("PROCESSOR_POSTGRES_DSN", ""),
             interval_seconds=int(os.getenv("PROCESSOR_INTERVAL_SECONDS", "60")),
-            mode=os.getenv("PROCESSOR_MODE", "dry-run"),
+            mode=os.getenv("PROCESSOR_MODE", "file"),
             file_store_path=os.getenv("PROCESSOR_FILE_STORE_PATH", "./var/data/logs.jsonl"),
             aggregate_store_path=os.getenv("PROCESSOR_AGGREGATE_STORE_PATH", "./var/data/aggregates.json"),
         )

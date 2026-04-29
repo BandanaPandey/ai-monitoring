@@ -61,6 +61,7 @@ class IngestLogRequest(BaseModel):
     feature: str | None = None
     endpoint: str | None = None
     environment: str | None = None
+    workspace_id: str | None = None
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -171,6 +172,14 @@ class AuthToken(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in_seconds: int
+    workspace_id: str | None = None
+    user_id: str | None = None
+
+
+class AuthenticatedIdentity(BaseModel):
+    user_id: str
+    email: str
+    workspace_id: str
 
 
 class ProcessorJob(str, Enum):

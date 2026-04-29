@@ -19,11 +19,26 @@ spec:
             - containerPort: 8001
           env:
             - name: INGEST_STORAGE_BACKEND
-              value: file
-            - name: INGEST_FILE_STORE_PATH
-              value: /app/var/data/logs.jsonl
+              value: clickhouse
+            - name: INGEST_CLICKHOUSE_DSN
+              value: clickhouse://default:@clickhouse:8123/default
+            - name: INGEST_POSTGRES_DSN
+              value: postgresql://postgres:postgres@postgres:5432/aimonitor
+            - name: INGEST_DEFAULT_WORKSPACE_ID
+              value: workspace-default
+            - name: INGEST_DEFAULT_WORKSPACE_NAME
+              value: Default Workspace
+            - name: INGEST_DEFAULT_WORKSPACE_SLUG
+              value: default-workspace
+            - name: INGEST_DEFAULT_USER_ID
+              value: user-admin
+            - name: INGEST_DEFAULT_USER_EMAIL
+              value: admin@example.com
+            - name: INGEST_DEFAULT_USER_PASSWORD
+              value: changeme
+            - name: INGEST_DEFAULT_API_KEY
+              value: demo-ingest-key
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8001
-

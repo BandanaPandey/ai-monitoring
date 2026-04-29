@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
-from pathlib import Path
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ai_monitoring_contracts.models import IngestLogRequest
+from ai_monitoring_contracts.persistence import (
+    clickhouse_columns,
+    ensure_clickhouse_tables,
+    ensure_postgres_schema,
+    log_to_clickhouse_row,
+    parse_clickhouse_dsn,
+    seed_workspace_auth,
+)
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 PHONE_RE = re.compile(r"\+?\d[\d\-\s]{7,}\d")
@@ -40,6 +48,12 @@ def redact_payload(payload: IngestLogRequest, redact_emails: bool, redact_phones
 class MemoryEventStore:
     items: dict[str, IngestLogRequest] = field(default_factory=dict)
 
+    def bootstrap(self) -> None:
+        return None
+
+    def resolve_workspace(self, api_key: str) -> str | None:
+        return "workspace-default" if api_key else None
+
     def write_log(self, payload: IngestLogRequest) -> bool:
         if payload.request_id in self.items:
             return False
@@ -50,10 +64,20 @@ class MemoryEventStore:
 @dataclass
 class FileEventStore:
     path: Path
+    default_api_key: str
+    default_workspace_id: str
 
     def __post_init__(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.touch(exist_ok=True)
+
+    def bootstrap(self) -> None:
+        return None
+
+    def resolve_workspace(self, api_key: str) -> str | None:
+        if api_key == self.default_api_key:
+            return self.default_workspace_id
+        return None
 
     def _load(self) -> dict[str, IngestLogRequest]:
         items: dict[str, IngestLogRequest] = {}
@@ -77,138 +101,90 @@ class FileEventStore:
         return True
 
 
+@dataclass
 class ClickHouseEventStore:
-    def __init__(self, dsn: str):
-        self.dsn = dsn
+    clickhouse_dsn: str
+    postgres_dsn: str
+    default_workspace_id: str
+    default_workspace_name: str
+    default_workspace_slug: str
+    default_user_id: str
+    default_user_email: str
+    default_user_password: str
+    default_api_key: str
 
-    def write_log(self, payload: IngestLogRequest) -> bool:
+    def _clickhouse_client(self) -> Any:
         try:
             import clickhouse_connect
         except ImportError as exc:
             raise RuntimeError("clickhouse-connect is required for ClickHouse storage") from exc
 
-        client = clickhouse_connect.get_client(dsn=self.dsn)
-        client.command(
-            """
-            CREATE TABLE IF NOT EXISTS llm_logs (
-                request_id String,
-                trace_id Nullable(String),
-                span_id Nullable(String),
-                timestamp DateTime64(3),
-                provider String,
-                model String,
-                model_version Nullable(String),
-                system_prompt Nullable(String),
-                input_messages String,
-                output_messages String,
-                raw_request String,
-                raw_response String,
-                latency_ms UInt32,
-                status String,
-                error_type Nullable(String),
-                error_code Nullable(String),
-                error_message Nullable(String),
-                tokens_input UInt32,
-                tokens_output UInt32,
-                tokens_total UInt32,
-                cost_input Float64,
-                cost_output Float64,
-                cost_total Float64,
-                currency String,
-                user_id Nullable(String),
-                session_id Nullable(String),
-                feature Nullable(String),
-                endpoint Nullable(String),
-                environment Nullable(String),
-                tags String,
-                metadata String
-            ) ENGINE = MergeTree
-            ORDER BY (timestamp, request_id)
-            """
+        parsed = parse_clickhouse_dsn(self.clickhouse_dsn)
+        return clickhouse_connect.get_client(
+            host=parsed.host,
+            port=parsed.port,
+            username=parsed.username,
+            password=parsed.password,
+            database=parsed.database,
+            secure=parsed.secure,
         )
+
+    def _postgres_conn(self) -> Any:
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("psycopg is required for Postgres auth storage") from exc
+        return psycopg.connect(self.postgres_dsn, autocommit=True)
+
+    def bootstrap(self) -> None:
+        client = self._clickhouse_client()
+        ensure_clickhouse_tables(client)
+        with self._postgres_conn() as conn:
+            ensure_postgres_schema(conn)
+            seed_workspace_auth(
+                conn,
+                workspace_id=self.default_workspace_id,
+                workspace_name=self.default_workspace_name,
+                workspace_slug=self.default_workspace_slug,
+                user_id=self.default_user_id,
+                user_email=self.default_user_email,
+                password=self.default_user_password,
+                api_key=self.default_api_key,
+            )
+
+    def resolve_workspace(self, api_key: str) -> str | None:
+        with self._postgres_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT workspace_id FROM api_keys WHERE api_key = %s", (api_key,))
+                row = cursor.fetchone()
+        return row[0] if row else None
+
+    def write_log(self, payload: IngestLogRequest) -> bool:
+        client = self._clickhouse_client()
+        ensure_clickhouse_tables(client)
         existing = client.query(
-            "SELECT count() AS count FROM llm_logs WHERE request_id = %(request_id)s",
-            parameters={"request_id": payload.request_id},
+            "SELECT count() AS count FROM llm_logs WHERE workspace_id = %(workspace_id)s AND request_id = %(request_id)s",
+            parameters={"workspace_id": payload.workspace_id, "request_id": payload.request_id},
         )
         if existing.result_rows and existing.result_rows[0][0] > 0:
             return False
-
-        row = payload.model_dump(mode="json")
-        client.insert(
-            "llm_logs",
-            [[
-                row["request_id"],
-                row.get("trace_id"),
-                row.get("span_id"),
-                row["timestamp"],
-                row["provider"],
-                row["model"],
-                row.get("model_version"),
-                row.get("system_prompt"),
-                str(row.get("input_messages", [])),
-                str(row.get("output_messages", [])),
-                str(row.get("raw_request", {})),
-                str(row.get("raw_response", {})),
-                row["latency_ms"],
-                row["status"],
-                row.get("error_type"),
-                row.get("error_code"),
-                row.get("error_message"),
-                row["tokens"]["input"],
-                row["tokens"]["output"],
-                row["tokens"]["total"],
-                row["cost_input"],
-                row["cost_output"],
-                row["cost_total"],
-                row["currency"],
-                row.get("user_id"),
-                row.get("session_id"),
-                row.get("feature"),
-                row.get("endpoint"),
-                row.get("environment"),
-                str(row.get("tags", [])),
-                str(row.get("metadata", {})),
-            ]],
-            column_names=[
-                "request_id",
-                "trace_id",
-                "span_id",
-                "timestamp",
-                "provider",
-                "model",
-                "model_version",
-                "system_prompt",
-                "input_messages",
-                "output_messages",
-                "raw_request",
-                "raw_response",
-                "latency_ms",
-                "status",
-                "error_type",
-                "error_code",
-                "error_message",
-                "tokens_input",
-                "tokens_output",
-                "tokens_total",
-                "cost_input",
-                "cost_output",
-                "cost_total",
-                "currency",
-                "user_id",
-                "session_id",
-                "feature",
-                "endpoint",
-                "environment",
-                "tags",
-                "metadata",
-            ],
-        )
+        client.insert("llm_logs", [log_to_clickhouse_row(payload)], column_names=clickhouse_columns())
         return True
 
 
-def build_store(backend: str, clickhouse_dsn: str, file_store_path: str) -> MemoryEventStore | FileEventStore | ClickHouseEventStore:
-    if backend == "clickhouse":
-        return ClickHouseEventStore(clickhouse_dsn)
-    if backend == "file":
-        return FileEventStore(Path(file_store_path))
+def build_store(settings: Any) -> MemoryEventStore | FileEventStore | ClickHouseEventStore:
+    if settings.storage_backend == "clickhouse":
+        return ClickHouseEventStore(
+            clickhouse_dsn=settings.clickhouse_dsn,
+            postgres_dsn=settings.postgres_dsn,
+            default_workspace_id=settings.default_workspace_id,
+            default_workspace_name=settings.default_workspace_name,
+            default_workspace_slug=settings.default_workspace_slug,
+            default_user_id=settings.default_user_id,
+            default_user_email=settings.default_user_email,
+            default_user_password=settings.default_user_password,
+            default_api_key=settings.default_api_key,
+        )
+    if settings.storage_backend == "file":
+        return FileEventStore(Path(settings.file_store_path), settings.default_api_key, settings.default_workspace_id)
     return MemoryEventStore()

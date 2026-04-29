@@ -19,13 +19,28 @@ spec:
             - containerPort: 8000
           env:
             - name: GATEWAY_STORAGE_BACKEND
-              value: file
-            - name: GATEWAY_FILE_STORE_PATH
-              value: /app/var/data/logs.jsonl
-            - name: GATEWAY_AGGREGATE_STORE_PATH
-              value: /app/var/data/aggregates.json
+              value: clickhouse
+            - name: GATEWAY_CLICKHOUSE_DSN
+              value: clickhouse://default:@clickhouse:8123/default
+            - name: GATEWAY_POSTGRES_DSN
+              value: postgresql://postgres:postgres@postgres:5432/aimonitor
+            - name: GATEWAY_DEFAULT_WORKSPACE_ID
+              value: workspace-default
+            - name: GATEWAY_DEFAULT_WORKSPACE_NAME
+              value: Default Workspace
+            - name: GATEWAY_DEFAULT_WORKSPACE_SLUG
+              value: default-workspace
+            - name: GATEWAY_DEFAULT_USER_ID
+              value: user-admin
+            - name: GATEWAY_AUTH_EMAIL
+              value: admin@example.com
+            - name: GATEWAY_AUTH_PASSWORD
+              value: changeme
+            - name: GATEWAY_AUTH_SECRET
+              value: local-dev-secret
+            - name: GATEWAY_DEFAULT_API_KEY
+              value: demo-ingest-key
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8000
-

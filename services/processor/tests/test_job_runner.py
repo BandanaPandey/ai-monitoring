@@ -40,7 +40,12 @@ def test_job_runner_writes_aggregate_snapshot(tmp_path):
         encoding="utf-8",
     )
 
-    runner = JobRunner(mode="file", file_store_path=str(file_store), aggregate_store_path=str(aggregate_store))
+    runner = JobRunner(
+        mode="file",
+        file_store_path=str(file_store),
+        aggregate_store_path=str(aggregate_store),
+        clickhouse_dsn="",
+    )
     results = runner.run_once()
 
     assert len(results) == 3

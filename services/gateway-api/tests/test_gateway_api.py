@@ -15,6 +15,7 @@ def seed_logs(path: Path) -> None:
     rows = [
         {
             "request_id": "req-a",
+            "workspace_id": "workspace-default",
             "provider": "openai",
             "model": "gpt-4o-mini",
             "latency_ms": 120,
@@ -25,6 +26,7 @@ def seed_logs(path: Path) -> None:
         },
         {
             "request_id": "req-b",
+            "workspace_id": "workspace-default",
             "provider": "anthropic",
             "model": "claude-3-5-sonnet",
             "latency_ms": 850,
@@ -58,7 +60,7 @@ def test_dashboard_summary_requires_auth():
 def test_dashboard_summary_and_log_detail(tmp_path):
     file_path = tmp_path / "logs.jsonl"
     seed_logs(file_path)
-    app_module.query_service = build_query_facade("file", str(file_path), str(tmp_path / "aggregates.json"))
+    app_module.query_service = build_query_facade("file", str(file_path), "")
 
     summary = client.get("/v1/dashboard/summary", headers=auth_header())
     assert summary.status_code == 200
@@ -76,7 +78,7 @@ def test_dashboard_summary_and_log_detail(tmp_path):
 def test_compare_and_filters(tmp_path):
     file_path = tmp_path / "logs.jsonl"
     seed_logs(file_path)
-    app_module.query_service = build_query_facade("file", str(file_path), str(tmp_path / "aggregates.json"))
+    app_module.query_service = build_query_facade("file", str(file_path), "")
 
     filtered = client.get("/v1/logs?status=error", headers=auth_header())
     assert filtered.status_code == 200

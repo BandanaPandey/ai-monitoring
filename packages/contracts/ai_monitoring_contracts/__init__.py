@@ -1,5 +1,6 @@
 from .models import (
     AuthToken,
+    AuthenticatedIdentity,
     CompareLogsResponse,
     CompareLogsRequest,
     DashboardSummary,
@@ -18,6 +19,7 @@ from .models import (
 
 __all__ = [
     "AuthToken",
+    "AuthenticatedIdentity",
     "CompareLogsResponse",
     "CompareLogsRequest",
     "DashboardSummary",

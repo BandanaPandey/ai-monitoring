@@ -15,18 +15,13 @@ from ai_monitoring_contracts.models import (
     LogQueryFilters,
 )
 
-from .auth import AuthManager
+from .auth import build_auth_manager
 from .config import Settings
 from .query_service import build_query_facade
 
 settings = Settings.from_env()
-query_service = build_query_facade(settings.storage_backend, settings.file_store_path, settings.aggregate_store_path)
-auth_manager = AuthManager(
-    email=settings.auth_email,
-    password=settings.auth_password,
-    secret=settings.auth_secret,
-    ttl_seconds=settings.access_token_ttl_seconds,
-)
+query_service = build_query_facade(settings.storage_backend, settings.file_store_path, settings.clickhouse_dsn)
+auth_manager = build_auth_manager(settings)
 
 app = FastAPI(title="AI Monitoring Gateway API", version="0.1.0")
 
@@ -40,6 +35,12 @@ def require_identity(payload: Annotated[dict, Depends(auth_manager.validate_toke
     return payload
 
 
+@app.on_event("startup")
+def bootstrap_services() -> None:
+    auth_manager.bootstrap()
+    query_service.bootstrap()
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "service": "gateway-api"}
@@ -51,13 +52,13 @@ def login(payload: LoginRequest) -> AuthToken:
 
 
 @app.get("/v1/dashboard/summary", response_model=DashboardSummary)
-def dashboard_summary(_: dict = Depends(require_identity)) -> DashboardSummary:
-    return query_service.get_dashboard_summary(settings.default_workspace_id)
+def dashboard_summary(identity: dict = Depends(require_identity)) -> DashboardSummary:
+    return query_service.get_dashboard_summary(identity["workspace_id"])
 
 
 @app.get("/v1/logs", response_model=LogListResponse)
 def list_logs(
-    _: dict = Depends(require_identity),
+    identity: dict = Depends(require_identity),
     limit: int = Query(default=50, le=200),
     search: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -79,20 +80,20 @@ def list_logs(
             "to": to_timestamp,
         }
     )
-    return query_service.list_logs(settings.default_workspace_id, filters=filters)
+    return query_service.list_logs(identity["workspace_id"], filters=filters)
 
 
 @app.get("/v1/logs/{request_id}", response_model=LogDetail)
-def get_log(request_id: str, _: dict = Depends(require_identity)) -> LogDetail:
-    item = query_service.get_log_detail(settings.default_workspace_id, request_id)
+def get_log(request_id: str, identity: dict = Depends(require_identity)) -> LogDetail:
+    item = query_service.get_log_detail(identity["workspace_id"], request_id)
     if item is None:
         raise HTTPException(status_code=404, detail="log_not_found")
     return item
 
 
 @app.post("/v1/logs/compare", response_model=CompareLogsResponse)
-def compare_logs(payload: CompareLogsRequest, _: dict = Depends(require_identity)) -> CompareLogsResponse:
-    response = query_service.compare_logs(settings.default_workspace_id, payload.left_request_id, payload.right_request_id)
+def compare_logs(payload: CompareLogsRequest, identity: dict = Depends(require_identity)) -> CompareLogsResponse:
+    response = query_service.compare_logs(identity["workspace_id"], payload.left_request_id, payload.right_request_id)
     if response is None:
         raise HTTPException(status_code=404, detail="compare_target_missing")
     return response

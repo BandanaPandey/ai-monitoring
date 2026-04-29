@@ -14,7 +14,9 @@ def main() -> int:
         mode=settings.mode,
         file_store_path=settings.file_store_path,
         aggregate_store_path=settings.aggregate_store_path,
+        clickhouse_dsn=settings.clickhouse_dsn,
     )
+    runner.bootstrap()
     command = sys.argv[1] if len(sys.argv) > 1 else "run-once"
 
     if command == "run-once":

@@ -23,13 +23,16 @@ services:
       context: ../..
       dockerfile: services/ingest-api/Dockerfile
     environment:
-      INGEST_API_KEYS: demo-ingest-key
-      INGEST_STORAGE_BACKEND: file
-      INGEST_FILE_STORE_PATH: /app/var/data/logs.jsonl
+      INGEST_STORAGE_BACKEND: clickhouse
       INGEST_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
       INGEST_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
-    volumes:
-      - shared-data:/app/var/data
+      INGEST_DEFAULT_WORKSPACE_ID: workspace-default
+      INGEST_DEFAULT_WORKSPACE_NAME: Default Workspace
+      INGEST_DEFAULT_WORKSPACE_SLUG: default-workspace
+      INGEST_DEFAULT_USER_ID: user-admin
+      INGEST_DEFAULT_USER_EMAIL: admin@example.com
+      INGEST_DEFAULT_USER_PASSWORD: changeme
+      INGEST_DEFAULT_API_KEY: demo-ingest-key
     ports:
       - "8001:8001"
     depends_on:
@@ -41,16 +44,17 @@ services:
       context: ../..
       dockerfile: services/gateway-api/Dockerfile
     environment:
-      GATEWAY_STORAGE_BACKEND: file
-      GATEWAY_FILE_STORE_PATH: /app/var/data/logs.jsonl
-      GATEWAY_AGGREGATE_STORE_PATH: /app/var/data/aggregates.json
+      GATEWAY_STORAGE_BACKEND: clickhouse
       GATEWAY_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
       GATEWAY_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
+      GATEWAY_DEFAULT_WORKSPACE_ID: workspace-default
+      GATEWAY_DEFAULT_WORKSPACE_NAME: Default Workspace
+      GATEWAY_DEFAULT_WORKSPACE_SLUG: default-workspace
+      GATEWAY_DEFAULT_USER_ID: user-admin
       GATEWAY_AUTH_EMAIL: admin@example.com
       GATEWAY_AUTH_PASSWORD: changeme
       GATEWAY_AUTH_SECRET: local-dev-secret
-    volumes:
-      - shared-data:/app/var/data
+      GATEWAY_DEFAULT_API_KEY: demo-ingest-key
     ports:
       - "8000:8000"
     depends_on:
@@ -62,13 +66,9 @@ services:
       context: ../..
       dockerfile: services/processor/Dockerfile
     environment:
-      PROCESSOR_MODE: file
-      PROCESSOR_FILE_STORE_PATH: /app/var/data/logs.jsonl
-      PROCESSOR_AGGREGATE_STORE_PATH: /app/var/data/aggregates.json
+      PROCESSOR_MODE: clickhouse
       PROCESSOR_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/aimonitor
       PROCESSOR_CLICKHOUSE_DSN: clickhouse://default:@clickhouse:8123/default
-    volumes:
-      - shared-data:/app/var/data
     depends_on:
       - ingest-api
 
@@ -86,5 +86,3 @@ services:
 volumes:
   postgres-data:
   clickhouse-data:
-  shared-data:
-

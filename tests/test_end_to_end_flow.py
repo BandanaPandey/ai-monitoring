@@ -12,9 +12,10 @@ def test_file_backed_end_to_end_flow(tmp_path: Path):
     log_path = tmp_path / "logs.jsonl"
     aggregate_path = tmp_path / "aggregates.json"
 
-    store = FileEventStore(log_path)
+    store = FileEventStore(log_path, "demo-ingest-key", "workspace-default")
     payload = IngestLogRequest(
         request_id="req-e2e",
+        workspace_id="workspace-default",
         provider="openai",
         model="gpt-4o-mini",
         system_prompt="Contact me at sam@example.com",
@@ -27,13 +28,18 @@ def test_file_backed_end_to_end_flow(tmp_path: Path):
     )
     assert store.write_log(redact_payload(payload, True, True)) is True
 
-    runner = JobRunner(mode="file", file_store_path=str(log_path), aggregate_store_path=str(aggregate_path))
+    runner = JobRunner(
+        mode="file",
+        file_store_path=str(log_path),
+        aggregate_store_path=str(aggregate_path),
+        clickhouse_dsn="",
+    )
     runner.run_once()
 
-    facade = build_query_facade("file", str(log_path), str(aggregate_path))
-    summary = facade.get_dashboard_summary("demo-workspace")
-    logs = facade.list_logs("demo-workspace", LogQueryFilters(limit=10))
-    detail = facade.get_log_detail("demo-workspace", "req-e2e")
+    facade = build_query_facade("file", str(log_path), "")
+    summary = facade.get_dashboard_summary("workspace-default")
+    logs = facade.list_logs("workspace-default", LogQueryFilters(limit=10))
+    detail = facade.get_log_detail("workspace-default", "req-e2e")
 
     assert summary.total_requests == 1
     assert logs.total == 1

@@ -4,7 +4,9 @@ import json
 import math
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ai_monitoring_contracts.models import (
     CompareLogsResponse,
@@ -16,6 +18,11 @@ from ai_monitoring_contracts.models import (
     LogListResponse,
     LogQueryFilters,
     MetricPoint,
+)
+from ai_monitoring_contracts.persistence import (
+    clickhouse_row_to_log,
+    ensure_clickhouse_tables,
+    parse_clickhouse_dsn,
 )
 
 
@@ -100,8 +107,11 @@ def _matches(item: IngestLogRequest, filters: LogQueryFilters) -> bool:
 class MemoryQueryService:
     items: dict[str, IngestLogRequest] = field(default_factory=dict)
 
-    def list_records(self) -> list[IngestLogRequest]:
-        return list(self.items.values())
+    def bootstrap(self) -> None:
+        return None
+
+    def list_records(self, workspace_id: str) -> list[IngestLogRequest]:
+        return [item for item in self.items.values() if item.workspace_id in {None, workspace_id}]
 
 
 @dataclass
@@ -112,33 +122,143 @@ class FileQueryService:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.touch(exist_ok=True)
 
-    def list_records(self) -> list[IngestLogRequest]:
+    def bootstrap(self) -> None:
+        return None
+
+    def list_records(self, workspace_id: str) -> list[IngestLogRequest]:
         items: list[IngestLogRequest] = []
         with self.path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 stripped = line.strip()
                 if not stripped:
                     continue
-                items.append(IngestLogRequest.model_validate(json.loads(stripped)))
+                payload = IngestLogRequest.model_validate(json.loads(stripped))
+                if payload.workspace_id in {None, workspace_id}:
+                    items.append(payload)
         return items
 
 
-class QueryFacade:
-    def __init__(self, storage: MemoryQueryService | FileQueryService, aggregate_path: Path | None = None):
-        self.storage = storage
-        self.aggregate_path = aggregate_path
+@dataclass
+class ClickHouseQueryService:
+    clickhouse_dsn: str
 
-    def _load_aggregate_summary(self) -> DashboardSummary | None:
-        if self.aggregate_path is None or not self.aggregate_path.exists():
-            return None
-        payload = json.loads(self.aggregate_path.read_text(encoding="utf-8"))
-        return DashboardSummary.model_validate(payload)
+    def _client(self) -> Any:
+        try:
+            import clickhouse_connect
+        except ImportError as exc:
+            raise RuntimeError("clickhouse-connect is required for ClickHouse queries") from exc
+
+        parsed = parse_clickhouse_dsn(self.clickhouse_dsn)
+        return clickhouse_connect.get_client(
+            host=parsed.host,
+            port=parsed.port,
+            username=parsed.username,
+            password=parsed.password,
+            database=parsed.database,
+            secure=parsed.secure,
+        )
+
+    def bootstrap(self) -> None:
+        ensure_clickhouse_tables(self._client())
+
+    def list_records(self, workspace_id: str) -> list[IngestLogRequest]:
+        client = self._client()
+        ensure_clickhouse_tables(client)
+        result = client.query(
+            """
+            SELECT *
+            FROM llm_logs
+            WHERE workspace_id = %(workspace_id)s
+            ORDER BY timestamp DESC
+            LIMIT 1000
+            """,
+            parameters={"workspace_id": workspace_id},
+        )
+        rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
+        return [clickhouse_row_to_log(row) for row in rows]
+
+    def fetch_daily_metrics(self, workspace_id: str) -> list[dict[str, Any]]:
+        client = self._client()
+        ensure_clickhouse_tables(client)
+        result = client.query(
+            """
+            SELECT bucket_date, total_requests, error_count, total_cost, average_latency_ms, p50_latency_ms, p95_latency_ms
+            FROM llm_daily_metrics
+            WHERE workspace_id = %(workspace_id)s
+            ORDER BY bucket_date ASC
+            """,
+            parameters={"workspace_id": workspace_id},
+        )
+        return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
+    def fetch_error_groups(self, workspace_id: str) -> list[dict[str, Any]]:
+        client = self._client()
+        ensure_clickhouse_tables(client)
+        result = client.query(
+            """
+            SELECT error_type, count
+            FROM llm_error_groups
+            WHERE workspace_id = %(workspace_id)s
+            ORDER BY count DESC
+            LIMIT 5
+            """,
+            parameters={"workspace_id": workspace_id},
+        )
+        return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
+
+class QueryFacade:
+    def __init__(self, storage: MemoryQueryService | FileQueryService | ClickHouseQueryService):
+        self.storage = storage
+
+    def bootstrap(self) -> None:
+        self.storage.bootstrap()
 
     def get_dashboard_summary(self, workspace_id: str) -> DashboardSummary:
-        snapshot = self._load_aggregate_summary()
-        if snapshot is not None:
-            return snapshot
-        logs = self.storage.list_records()
+        if isinstance(self.storage, ClickHouseQueryService):
+            metrics = self.storage.fetch_daily_metrics(workspace_id)
+            error_groups = self.storage.fetch_error_groups(workspace_id)
+            if metrics:
+                total_requests = sum(int(row["total_requests"]) for row in metrics)
+                total_errors = sum(int(row["error_count"]) for row in metrics)
+                total_cost = sum(float(row["total_cost"]) for row in metrics)
+                avg_source = [float(row["average_latency_ms"]) for row in metrics]
+                p50_source = [float(row["p50_latency_ms"]) for row in metrics]
+                p95_source = [float(row["p95_latency_ms"]) for row in metrics]
+                return DashboardSummary(
+                    total_requests=total_requests,
+                    average_latency_ms=sum(avg_source) / len(avg_source),
+                    p50_latency_ms=max(p50_source) if p50_source else 0.0,
+                    p95_latency_ms=max(p95_source) if p95_source else 0.0,
+                    error_rate=(total_errors / total_requests) if total_requests else 0.0,
+                    total_cost=round(total_cost, 6),
+                    request_volume=[
+                        MetricPoint(
+                            timestamp=datetime.combine(row["bucket_date"], datetime.min.time(), timezone.utc),
+                            value=float(row["total_requests"]),
+                        )
+                        for row in metrics
+                    ],
+                    latency_series=[
+                        MetricPoint(
+                            timestamp=datetime.combine(row["bucket_date"], datetime.min.time(), timezone.utc),
+                            value=float(row["average_latency_ms"]),
+                        )
+                        for row in metrics
+                    ],
+                    cost_series=[
+                        MetricPoint(
+                            timestamp=datetime.combine(row["bucket_date"], datetime.min.time(), timezone.utc),
+                            value=float(row["total_cost"]),
+                        )
+                        for row in metrics
+                    ],
+                    top_errors=[
+                        ErrorSummary(error_type=row["error_type"], count=int(row["count"])) for row in error_groups
+                    ],
+                )
+
+        logs = self.storage.list_records(workspace_id)
         latencies = [item.latency_ms for item in logs]
         total_cost = sum(item.cost_total for item in logs)
         error_count = sum(1 for item in logs if item.status.value == "error")
@@ -173,7 +293,7 @@ class QueryFacade:
         )
 
     def list_logs(self, workspace_id: str, filters: LogQueryFilters) -> LogListResponse:
-        logs = [item for item in self.storage.list_records() if _matches(item, filters)]
+        logs = [item for item in self.storage.list_records(workspace_id) if _matches(item, filters)]
         logs = sorted(logs, key=lambda item: item.timestamp, reverse=True)
         limited = logs[: filters.limit]
         return LogListResponse(
@@ -197,7 +317,7 @@ class QueryFacade:
         )
 
     def get_log_detail(self, workspace_id: str, request_id: str) -> LogDetail | None:
-        for item in self.storage.list_records():
+        for item in self.storage.list_records(workspace_id):
             if item.request_id == request_id:
                 return _to_detail(item)
         return None
@@ -215,7 +335,9 @@ class QueryFacade:
         )
 
 
-def build_query_facade(backend: str, file_store_path: str, aggregate_store_path: str) -> QueryFacade:
+def build_query_facade(backend: str, file_store_path: str, clickhouse_dsn: str) -> QueryFacade:
+    if backend == "clickhouse":
+        return QueryFacade(ClickHouseQueryService(clickhouse_dsn))
     if backend == "file":
-        return QueryFacade(FileQueryService(Path(file_store_path)), Path(aggregate_store_path))
+        return QueryFacade(FileQueryService(Path(file_store_path)))
     return QueryFacade(MemoryQueryService())

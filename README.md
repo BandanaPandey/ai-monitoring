@@ -33,22 +33,26 @@ The repo is structured so each service can be built and deployed separately. Loc
 
 ```bash
 docker compose -f infra/compose/docker-compose.yml up --build
+```
 
-The default local stack uses a shared file-backed data path between services so the full flow works without requiring the analytics adapters to be completed first. ClickHouse and Postgres are still provisioned in Compose and remain the target production backends.
+The default local stack now uses real `ClickHouse + Postgres`. The file-backed path remains available only as an explicit dev/test fallback.
 
 ## Verification
 
 - Python services: run syntax checks with `python3 -m compileall packages services tests`
 - Web smoke check: run `npm --workspace services/web test`
-- Full stack: start Compose, send a log to `ingest-api`, run `processor`, then inspect results in `web`
+- Full stack:
+  - start Compose
+  - send a log to `ingest-api` with `x-api-key: demo-ingest-key`
+  - run `python -m processor.main run-once` inside the processor container or let the loop run
+  - inspect dashboard data through `gateway-api` or `web`
 
 ## Git Remotes
 
-Expected remotes for release:
+Configured remotes:
 
-- `origin` -> `https://github.com/BandanaPandey/ai-monitoring`
-- `gitlab` -> `https://gitlab.com/bandanapandey11/ai-monitoring`
-```
+- `origin` -> `git@github.com:BandanaPandey/ai-monitoring.git`
+- `gitlab` -> `git@gitlab.com:bandanapandey11/ai-monitoring.git`
 
 ## Architectural Rules
 

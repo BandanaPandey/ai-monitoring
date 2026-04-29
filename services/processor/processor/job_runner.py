@@ -5,8 +5,14 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ai_monitoring_contracts.models import DashboardSummary, ErrorSummary, IngestLogRequest, MetricPoint, ProcessorJob
+from ai_monitoring_contracts.persistence import (
+    clickhouse_row_to_log,
+    ensure_clickhouse_tables,
+    parse_clickhouse_dsn,
+)
 
 
 def _percentile(values: list[int], pct: float) -> float:
@@ -22,8 +28,35 @@ class JobRunner:
     mode: str
     file_store_path: str
     aggregate_store_path: str
+    clickhouse_dsn: str
+
+    def _clickhouse_client(self) -> Any:
+        try:
+            import clickhouse_connect
+        except ImportError as exc:
+            raise RuntimeError("clickhouse-connect is required for processor ClickHouse mode") from exc
+        parsed = parse_clickhouse_dsn(self.clickhouse_dsn)
+        return clickhouse_connect.get_client(
+            host=parsed.host,
+            port=parsed.port,
+            username=parsed.username,
+            password=parsed.password,
+            database=parsed.database,
+            secure=parsed.secure,
+        )
+
+    def bootstrap(self) -> None:
+        if self.mode == "clickhouse":
+            ensure_clickhouse_tables(self._clickhouse_client())
 
     def _load_logs(self) -> list[IngestLogRequest]:
+        if self.mode == "clickhouse":
+            client = self._clickhouse_client()
+            ensure_clickhouse_tables(client)
+            result = client.query("SELECT * FROM llm_logs")
+            rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
+            return [clickhouse_row_to_log(row) for row in rows]
+
         path = Path(self.file_store_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
@@ -70,12 +103,66 @@ class JobRunner:
             top_errors=[ErrorSummary(error_type=error, count=count) for error, count in errors.most_common(5)],
         )
 
+    def _persist_clickhouse_aggregates(self, logs: list[IngestLogRequest]) -> None:
+        client = self._clickhouse_client()
+        ensure_clickhouse_tables(client)
+        client.command("TRUNCATE TABLE llm_daily_metrics")
+        client.command("TRUNCATE TABLE llm_error_groups")
+
+        daily_rows: list[list[Any]] = []
+        error_rows: list[list[Any]] = []
+        by_workspace_day: dict[tuple[str, str], list[IngestLogRequest]] = {}
+        for log in logs:
+            key = (log.workspace_id or "unknown-workspace", log.timestamp.date().isoformat())
+            by_workspace_day.setdefault(key, []).append(log)
+        for (workspace_id, day), items in by_workspace_day.items():
+            latencies = [item.latency_ms for item in items]
+            daily_rows.append(
+                [
+                    workspace_id,
+                    day,
+                    len(items),
+                    sum(1 for item in items if item.status.value == "error"),
+                    sum(item.cost_total for item in items),
+                    (sum(latencies) / len(latencies)) if latencies else 0.0,
+                    _percentile(latencies, 50),
+                    _percentile(latencies, 95),
+                ]
+            )
+        error_counter: Counter[tuple[str, str]] = Counter()
+        for log in logs:
+            if log.status.value == "error":
+                error_counter[(log.workspace_id or "unknown-workspace", log.error_type or "unknown")] += 1
+        for (workspace_id, error_type), count in error_counter.items():
+            error_rows.append([workspace_id, error_type, count])
+
+        if daily_rows:
+            client.insert(
+                "llm_daily_metrics",
+                daily_rows,
+                column_names=[
+                    "workspace_id",
+                    "bucket_date",
+                    "total_requests",
+                    "error_count",
+                    "total_cost",
+                    "average_latency_ms",
+                    "p50_latency_ms",
+                    "p95_latency_ms",
+                ],
+            )
+        if error_rows:
+            client.insert("llm_error_groups", error_rows, column_names=["workspace_id", "error_type", "count"])
+
     def run_once(self) -> list[dict[str, str]]:
         logs = self._load_logs()
         summary = self._build_summary(logs)
-        aggregate_path = Path(self.aggregate_store_path)
-        aggregate_path.parent.mkdir(parents=True, exist_ok=True)
-        aggregate_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+        if self.mode == "clickhouse":
+            self._persist_clickhouse_aggregates(logs)
+        else:
+            aggregate_path = Path(self.aggregate_store_path)
+            aggregate_path.parent.mkdir(parents=True, exist_ok=True)
+            aggregate_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
         return [
             {"job": ProcessorJob.ROLLUP_METRICS.value, "mode": self.mode, "status": "completed"},
             {"job": ProcessorJob.GROUP_ERRORS.value, "mode": self.mode, "status": "completed"},
