@@ -15,7 +15,7 @@ class RequestStatus(str, Enum):
 class TokenUsage(BaseModel):
     input: int = Field(default=0, ge=0)
     output: int = Field(default=0, ge=0)
-    total: int = Field(default=0, ge=0)
+    total: int | None = Field(default=None, ge=0)
 
     @field_validator("total", mode="before")
     @classmethod
@@ -54,7 +54,7 @@ class IngestLogRequest(BaseModel):
     tokens: TokenUsage = Field(default_factory=TokenUsage)
     cost_input: float = Field(default=0.0, ge=0)
     cost_output: float = Field(default=0.0, ge=0)
-    cost_total: float = Field(default=0.0, ge=0)
+    cost_total: float | None = Field(default=None, ge=0)
     currency: str = "USD"
     user_id: str | None = None
     session_id: str | None = None

@@ -4,6 +4,7 @@ import json
 import math
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -120,7 +121,7 @@ class JobRunner:
             daily_rows.append(
                 [
                     workspace_id,
-                    day,
+                    date.fromisoformat(day),
                     len(items),
                     sum(1 for item in items if item.status.value == "error"),
                     sum(item.cost_total for item in items),
