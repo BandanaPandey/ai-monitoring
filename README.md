@@ -37,6 +37,23 @@ docker compose -f infra/compose/docker-compose.yml up --build
 
 The default local stack now uses real `ClickHouse + Postgres`. The file-backed path remains available only as an explicit dev/test fallback.
 
+If Docker is unavailable on your machine, you can also boot repo-local database processes directly:
+
+```bash
+./scripts/start_local_db_stack.sh
+```
+
+This starts:
+- Postgres on `127.0.0.1:55432`
+- ClickHouse TCP on `127.0.0.1:59000`
+- ClickHouse HTTP on `127.0.0.1:58123`
+
+To stop them:
+
+```bash
+./scripts/stop_local_db_stack.sh
+```
+
 ## Verification
 
 - Python services: run syntax checks with `python3 -m compileall packages services tests`

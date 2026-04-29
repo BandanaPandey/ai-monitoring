@@ -7,6 +7,10 @@
 __pycache__/
 *.pyc
 *.pyo
+.runtime/
+access/
+preprocessed_configs/
+*.egg-info/
 dist/
 node_modules/
 coverage/
