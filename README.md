@@ -54,15 +54,54 @@ To stop them:
 ./scripts/stop_local_db_stack.sh
 ```
 
+## Local UI Verification
+
+Use the same runtime path that is now proven locally:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e packages/contracts -e packages/sdk-python -e services/ingest-api -e services/gateway-api -e services/processor pytest email-validator
+npm install --workspace services/web
+./scripts/start_local_db_stack.sh
+```
+
+Start the services in separate terminals:
+
+```bash
+./scripts/run_local_gateway.sh
+./scripts/run_local_ingest_api.sh
+./scripts/run_local_web.sh
+```
+
+Seed fresh data and recompute aggregates:
+
+```bash
+./scripts/send_sample_log.sh
+./scripts/run_local_processor_once.sh
+```
+
+Then open [http://127.0.0.1:5173](http://127.0.0.1:5173) and sign in with:
+- email: `admin@example.com`
+- password: `changeme`
+
+Expected verified UI flow:
+- dashboard summary loads from `gateway-api`
+- logs explorer lists the sample request
+- request detail shows the prompt and response payload
+- `Compare Latest Two` renders output side by side
+
 ## Verification
 
 - Python services: run syntax checks with `python3 -m compileall packages services tests`
 - Web smoke check: run `npm --workspace services/web test`
-- Full stack:
-  - start Compose
-  - send a log to `ingest-api` with `x-api-key: demo-ingest-key`
-  - run `python -m processor.main run-once` inside the processor container or let the loop run
-  - inspect dashboard data through `gateway-api` or `web`
+- DB-backed local stack:
+  - `./scripts/start_local_db_stack.sh`
+  - `./scripts/run_local_gateway.sh`
+  - `./scripts/run_local_ingest_api.sh`
+  - `./scripts/send_sample_log.sh`
+  - `./scripts/run_local_processor_once.sh`
+  - `./scripts/run_local_web.sh`
 
 ## Git Remotes
 

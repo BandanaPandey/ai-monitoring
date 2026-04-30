@@ -29,19 +29,27 @@ def _redact_string(value: str, redact_emails: bool, redact_phones: bool) -> str:
     return value
 
 
+def _walk_redactable(value: Any, redact_emails: bool, redact_phones: bool) -> Any:
+    if isinstance(value, str):
+        return _redact_string(value, redact_emails, redact_phones)
+    if isinstance(value, list):
+        return [_walk_redactable(item, redact_emails, redact_phones) for item in value]
+    if isinstance(value, dict):
+        return {key: _walk_redactable(item, redact_emails, redact_phones) for key, item in value.items()}
+    return value
+
+
 def redact_payload(payload: IngestLogRequest, redact_emails: bool, redact_phones: bool) -> IngestLogRequest:
     data = payload.model_dump()
+    for field_name in ("system_prompt", "error_message"):
+        if data.get(field_name):
+            data[field_name] = _redact_string(data[field_name], redact_emails, redact_phones)
 
-    def walk(value: Any) -> Any:
-        if isinstance(value, str):
-            return _redact_string(value, redact_emails, redact_phones)
-        if isinstance(value, list):
-            return [walk(item) for item in value]
-        if isinstance(value, dict):
-            return {key: walk(item) for key, item in value.items()}
-        return value
+    for field_name in ("input_messages", "output_messages", "raw_request", "raw_response", "metadata"):
+        if data.get(field_name):
+            data[field_name] = _walk_redactable(data[field_name], redact_emails, redact_phones)
 
-    return IngestLogRequest.model_validate(walk(data))
+    return IngestLogRequest.model_validate(data)
 
 
 @dataclass
