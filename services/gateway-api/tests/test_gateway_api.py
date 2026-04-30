@@ -57,6 +57,18 @@ def test_dashboard_summary_requires_auth():
     assert response.status_code == 401
 
 
+def test_auth_preflight_allows_local_web_origin():
+    response = client.options(
+        "/v1/auth/login",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
 def test_dashboard_summary_and_log_detail(tmp_path):
     file_path = tmp_path / "logs.jsonl"
     seed_logs(file_path)

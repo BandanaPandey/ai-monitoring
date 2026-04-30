@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 *.pyo
 .runtime/
+var/
 access/
 preprocessed_configs/
 *.egg-info/

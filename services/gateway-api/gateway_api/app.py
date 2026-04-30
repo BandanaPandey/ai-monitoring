@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 
 from ai_monitoring_contracts.models import (
@@ -24,6 +25,13 @@ query_service = build_query_facade(settings.storage_backend, settings.file_store
 auth_manager = build_auth_manager(settings)
 
 app = FastAPI(title="AI Monitoring Gateway API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(settings.cors_allowed_origins),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 class LoginRequest(BaseModel):
