@@ -11,4 +11,3 @@ test("web app references only gateway api routes", () => {
   assert.doesNotMatch(apiSource, /postgres/i);
   assert.doesNotMatch(apiSource, /ingest-api/i);
 });
-

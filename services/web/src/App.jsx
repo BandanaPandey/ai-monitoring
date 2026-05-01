@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { compareLogs, fetchLogDetail, fetchLogs, fetchSummary, login } from "./api";
+import { buildComparisonTexts, buildDetailView, buildLogRows, buildMetricCards } from "./presenters";
 
 const defaultCredentials = {
   email: "admin@example.com",
@@ -24,6 +25,10 @@ export default function App() {
   const [comparison, setComparison] = useState(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const metricCards = buildMetricCards(summary);
+  const logRows = buildLogRows(logs);
+  const detailView = buildDetailView(selectedLog);
+  const comparisonTexts = buildComparisonTexts(comparison);
 
   async function loadDashboard(activeToken, searchValue = "") {
     const summaryPayload = await fetchSummary(activeToken);
@@ -123,13 +128,11 @@ export default function App() {
         </div>
       </header>
 
-      {summary ? (
+      {metricCards.length ? (
         <section className="metric-grid">
-          <MetricCard label="Total Requests" value={summary.total_requests} />
-          <MetricCard label="Avg Latency" value={`${Math.round(summary.average_latency_ms)} ms`} />
-          <MetricCard label="P95 Latency" value={`${Math.round(summary.p95_latency_ms)} ms`} />
-          <MetricCard label="Error Rate" value={`${(summary.error_rate * 100).toFixed(1)}%`} />
-          <MetricCard label="Total Cost" value={`$${summary.total_cost.toFixed(4)}`} />
+          {metricCards.map((card) => (
+            <MetricCard key={card.label} label={card.label} value={card.value} />
+          ))}
         </section>
       ) : null}
 
@@ -137,9 +140,9 @@ export default function App() {
         <section className="panel">
           <h2>Logs Explorer</h2>
           <div className="log-list">
-            {logs.map((log) => (
-              <button key={log.request_id} className="log-row" type="button" onClick={() => handleSelectLog(log.request_id)}>
-                <strong>{log.request_id}</strong>
+            {logRows.map((log) => (
+              <button key={log.requestId} className="log-row" type="button" onClick={() => handleSelectLog(log.requestId)}>
+                <strong>{log.requestId}</strong>
                 <span>{log.model}</span>
                 <span>{log.status}</span>
                 <span>{log.preview}</span>
@@ -150,14 +153,14 @@ export default function App() {
 
         <section className="panel">
           <h2>Request Detail</h2>
-          {selectedLog ? (
+          {detailView ? (
             <div className="detail-stack">
-              <p><strong>Feature:</strong> {selectedLog.feature || "n/a"}</p>
-              <p><strong>Latency:</strong> {selectedLog.latency_ms} ms</p>
-              <p><strong>Cost:</strong> ${selectedLog.total_cost.toFixed(4)}</p>
-              <p><strong>System Prompt:</strong> {selectedLog.system_prompt || "n/a"}</p>
-              <pre>{JSON.stringify(selectedLog.input_messages, null, 2)}</pre>
-              <pre>{JSON.stringify(selectedLog.output_messages, null, 2)}</pre>
+              <p><strong>Feature:</strong> {detailView.feature}</p>
+              <p><strong>Latency:</strong> {detailView.latency}</p>
+              <p><strong>Cost:</strong> {detailView.cost}</p>
+              <p><strong>System Prompt:</strong> {detailView.systemPrompt}</p>
+              <pre>{detailView.inputMessages}</pre>
+              <pre>{detailView.outputMessages}</pre>
             </div>
           ) : (
             <p>Select a request to inspect its full prompt and response payload.</p>
@@ -165,12 +168,13 @@ export default function App() {
         </section>
       </section>
 
-      {comparison ? (
+      {comparisonTexts.length ? (
         <section className="panel comparison-panel">
           <h2>Compare Outputs</h2>
           <div className="comparison-grid">
-            <pre>{comparison.left_text}</pre>
-            <pre>{comparison.right_text}</pre>
+            {comparisonTexts.map((text, index) => (
+              <pre key={index}>{text}</pre>
+            ))}
           </div>
         </section>
       ) : null}
@@ -179,4 +183,3 @@ export default function App() {
     </main>
   );
 }
-

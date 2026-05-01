@@ -1,4 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_GATEWAY_API_URL || "http://localhost:8000";
+export const API_BASE_URL =
+  globalThis.__AI_MONITORING_GATEWAY_API_URL__ ||
+  import.meta.env?.VITE_GATEWAY_API_URL ||
+  "http://localhost:8000";
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, options);
@@ -49,4 +52,3 @@ export async function compareLogs(token, leftRequestId, rightRequestId) {
     }),
   });
 }
-

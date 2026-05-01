@@ -27,6 +27,7 @@ def seed_logs(path: Path) -> None:
         {
             "request_id": "req-b",
             "workspace_id": "workspace-default",
+            "timestamp": "2026-05-01T00:00:00+00:00",
             "provider": "anthropic",
             "model": "claude-3-5-sonnet",
             "latency_ms": 850,
@@ -36,6 +37,18 @@ def seed_logs(path: Path) -> None:
             "cost_total": 0.0006,
             "input_messages": [{"role": "user", "content": "report"}],
             "output_messages": [{"role": "assistant", "content": "timeout"}],
+        },
+        {
+            "request_id": "req-other-workspace",
+            "workspace_id": "workspace-other",
+            "timestamp": "2026-05-02T00:00:00+00:00",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "latency_ms": 40,
+            "tokens": {"input": 2, "output": 2, "total": 4},
+            "cost_total": 0.0002,
+            "input_messages": [{"role": "user", "content": "hidden"}],
+            "output_messages": [{"role": "assistant", "content": "hidden"}],
         },
     ]
     with path.open("w", encoding="utf-8") as handle:
@@ -55,6 +68,19 @@ def auth_header() -> dict[str, str]:
 def test_dashboard_summary_requires_auth():
     response = client.get("/v1/dashboard/summary")
     assert response.status_code == 401
+
+
+def test_dashboard_summary_returns_zeroes_for_empty_workspace(tmp_path):
+    file_path = tmp_path / "logs.jsonl"
+    file_path.write_text("", encoding="utf-8")
+    app_module.query_service = build_query_facade("file", str(file_path), "")
+
+    summary = client.get("/v1/dashboard/summary", headers=auth_header())
+
+    assert summary.status_code == 200
+    assert summary.json()["total_requests"] == 0
+    assert summary.json()["total_cost"] == 0
+    assert summary.json()["request_volume"] == []
 
 
 def test_auth_preflight_allows_local_web_origin():
@@ -77,9 +103,11 @@ def test_dashboard_summary_and_log_detail(tmp_path):
     summary = client.get("/v1/dashboard/summary", headers=auth_header())
     assert summary.status_code == 200
     assert summary.json()["total_requests"] >= 2
+    assert summary.json()["total_cost"] == 0.0018
 
     logs = client.get("/v1/logs", headers=auth_header())
     assert logs.status_code == 200
+    assert logs.json()["total"] == 2
     first = logs.json()["items"][0]["request_id"]
 
     detail = client.get(f"/v1/logs/{first}", headers=auth_header())
@@ -103,3 +131,17 @@ def test_compare_and_filters(tmp_path):
     )
     assert compared.status_code == 200
     assert "left_text" in compared.json()
+
+
+def test_compare_returns_404_for_missing_request(tmp_path):
+    file_path = tmp_path / "logs.jsonl"
+    seed_logs(file_path)
+    app_module.query_service = build_query_facade("file", str(file_path), "")
+
+    compared = client.post(
+        "/v1/logs/compare",
+        json={"left_request_id": "req-a", "right_request_id": "missing"},
+        headers=auth_header(),
+    )
+
+    assert compared.status_code == 404
