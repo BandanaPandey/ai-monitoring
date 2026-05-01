@@ -81,6 +81,18 @@ Seed fresh data and recompute aggregates:
 ./scripts/run_local_processor_once.sh
 ```
 
+Reset local test data before a clean verification run:
+
+```bash
+./scripts/reset_local_data.sh
+```
+
+Run the headless API-level verification against the live local stack:
+
+```bash
+./scripts/verify_local_e2e.sh
+```
+
 Then open [http://127.0.0.1:5173](http://127.0.0.1:5173) and sign in with:
 - email: `admin@example.com`
 - password: `changeme`
@@ -97,11 +109,21 @@ Expected verified UI flow:
 - Web smoke check: run `npm --workspace services/web test`
 - DB-backed local stack:
   - `./scripts/start_local_db_stack.sh`
+  - `./scripts/reset_local_data.sh`
   - `./scripts/run_local_gateway.sh`
   - `./scripts/run_local_ingest_api.sh`
   - `./scripts/send_sample_log.sh`
   - `./scripts/run_local_processor_once.sh`
+  - `./scripts/verify_local_e2e.sh`
   - `./scripts/run_local_web.sh`
+
+## Local Health Checks
+
+- Postgres: `psql postgresql://$(whoami)@127.0.0.1:55432/aimonitor -c 'select 1'`
+- ClickHouse: `curl http://127.0.0.1:58123/?query=SELECT%201`
+- Gateway API: `curl http://127.0.0.1:8000/healthz`
+- Ingest API: `curl http://127.0.0.1:8001/healthz`
+- Web app: open [http://127.0.0.1:5173](http://127.0.0.1:5173)
 
 ## Git Remotes
 

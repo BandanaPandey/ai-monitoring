@@ -33,6 +33,15 @@ if ! pg_ctl -D "$PG_DATA_DIR" status >/dev/null 2>&1; then
   pg_ctl -D "$PG_DATA_DIR" -l "$LOG_DIR/postgres.log" -o "-p $PG_PORT -k $PG_SOCKET_DIR" start >/dev/null
 fi
 
+for _ in $(seq 1 30); do
+  if psql "postgresql://$(whoami)@127.0.0.1:$PG_PORT/postgres" -Atqc "select 1" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+psql "postgresql://$(whoami)@127.0.0.1:$PG_PORT/postgres" -Atqc "select 1" >/dev/null
+
 if ! psql -h "$PG_SOCKET_DIR" -p "$PG_PORT" -lqt | cut -d '|' -f 1 | tr -d ' ' | grep -qx "$PG_DB"; then
   createdb -h "$PG_SOCKET_DIR" -p "$PG_PORT" "$PG_DB"
 fi
@@ -47,6 +56,15 @@ if ! TMPDIR=/tmp clickhouse client --host 127.0.0.1 --port "$CLICKHOUSE_TCP_PORT
     >"$LOG_DIR/clickhouse.stdout.log" 2>&1 &
   echo $! > "$CLICKHOUSE_PID_FILE"
 fi
+
+for _ in $(seq 1 30); do
+  if curl -fsS "http://127.0.0.1:$CLICKHOUSE_HTTP_PORT/?query=SELECT%201" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+curl -fsS "http://127.0.0.1:$CLICKHOUSE_HTTP_PORT/?query=SELECT%201" >/dev/null
 
 echo "Postgres: postgres://$(whoami)@127.0.0.1:$PG_PORT/$PG_DB"
 echo "ClickHouse TCP: 127.0.0.1:$CLICKHOUSE_TCP_PORT"
