@@ -93,6 +93,21 @@ Run the headless API-level verification against the live local stack:
 ./scripts/verify_local_e2e.sh
 ```
 
+Run the browser-driven local verification against the same stack:
+
+```bash
+./scripts/run_local_browser_e2e.sh
+```
+
+The browser E2E runner uses a locally installed Chrome executable by default:
+- `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+
+Override it if needed:
+
+```bash
+CHROME_EXECUTABLE_PATH="/path/to/Chrome" ./scripts/run_local_browser_e2e.sh
+```
+
 Then open [http://127.0.0.1:5173](http://127.0.0.1:5173) and sign in with:
 - email: `admin@example.com`
 - password: `changeme`
@@ -107,6 +122,7 @@ Expected verified UI flow:
 
 - Python services: run syntax checks with `python3 -m compileall packages services tests`
 - Web smoke check: run `npm --workspace services/web test`
+- Web browser E2E: run `./scripts/run_local_browser_e2e.sh`
 - DB-backed local stack:
   - `./scripts/start_local_db_stack.sh`
   - `./scripts/reset_local_data.sh`
@@ -115,6 +131,7 @@ Expected verified UI flow:
   - `./scripts/send_sample_log.sh`
   - `./scripts/run_local_processor_once.sh`
   - `./scripts/verify_local_e2e.sh`
+  - `./scripts/run_local_browser_e2e.sh`
   - `./scripts/run_local_web.sh`
 
 ## Local Health Checks
