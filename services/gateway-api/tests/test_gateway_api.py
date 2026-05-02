@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from gateway_api import app as app_module
-from gateway_api.query_service import build_query_facade
+from gateway_api.query_service import ClickHouseQueryService, QueryFacade, build_query_facade
 
 
 client = TestClient(app_module.app)
@@ -145,3 +145,59 @@ def test_compare_returns_404_for_missing_request(tmp_path):
     )
 
     assert compared.status_code == 404
+
+
+class FakeClickHouseQueryService(ClickHouseQueryService):
+    def __init__(self):
+        super().__init__("clickhouse://unused")
+
+    def bootstrap(self) -> None:
+        return None
+
+    def fetch_headline_metrics(self, workspace_id: str) -> dict[str, float]:
+        assert workspace_id == "workspace-default"
+        return {
+            "total_requests": 4,
+            "error_count": 1,
+            "total_cost": 2.2,
+            "average_latency_ms": 302.5,
+            "p50_latency_ms": 110.0,
+            "p95_latency_ms": 900.0,
+        }
+
+    def fetch_daily_metrics(self, workspace_id: str) -> list[dict[str, object]]:
+        return [
+            {
+                "bucket_date": __import__("datetime").date(2026, 5, 1),
+                "total_requests": 3,
+                "error_count": 1,
+                "total_cost": 2.0,
+                "average_latency_ms": 370.0,
+                "p50_latency_ms": 100.0,
+                "p95_latency_ms": 900.0,
+            },
+            {
+                "bucket_date": __import__("datetime").date(2026, 5, 2),
+                "total_requests": 1,
+                "error_count": 0,
+                "total_cost": 0.2,
+                "average_latency_ms": 100.0,
+                "p50_latency_ms": 100.0,
+                "p95_latency_ms": 100.0,
+            },
+        ]
+
+    def fetch_error_groups(self, workspace_id: str) -> list[dict[str, object]]:
+        return [{"error_type": "timeout", "count": 1}]
+
+
+def test_clickhouse_summary_uses_headline_metrics_not_daily_averages():
+    summary = QueryFacade(FakeClickHouseQueryService()).get_dashboard_summary("workspace-default")
+
+    assert summary.total_requests == 4
+    assert summary.average_latency_ms == 302.5
+    assert summary.p50_latency_ms == 110.0
+    assert summary.p95_latency_ms == 900.0
+    assert summary.error_rate == 0.25
+    assert summary.total_cost == 2.2
+    assert len(summary.request_volume) == 2

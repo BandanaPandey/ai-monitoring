@@ -191,6 +191,42 @@ class ClickHouseQueryService:
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
+    def fetch_headline_metrics(self, workspace_id: str) -> dict[str, Any]:
+        client = self._client()
+        ensure_clickhouse_tables(client)
+        result = client.query(
+            """
+            SELECT
+                count() AS total_requests,
+                countIf(status = 'error') AS error_count,
+                sum(cost_total) AS total_cost,
+                avg(latency_ms) AS average_latency_ms,
+                quantileExact(0.50)(latency_ms) AS p50_latency_ms,
+                quantileExact(0.95)(latency_ms) AS p95_latency_ms
+            FROM llm_logs
+            WHERE workspace_id = %(workspace_id)s
+            """,
+            parameters={"workspace_id": workspace_id},
+        )
+        if not result.result_rows:
+            return {
+                "total_requests": 0,
+                "error_count": 0,
+                "total_cost": 0.0,
+                "average_latency_ms": 0.0,
+                "p50_latency_ms": 0.0,
+                "p95_latency_ms": 0.0,
+            }
+        row = result.result_rows[0]
+        return {
+            "total_requests": int(row[0] or 0),
+            "error_count": int(row[1] or 0),
+            "total_cost": float(row[2] or 0.0),
+            "average_latency_ms": float(row[3] or 0.0),
+            "p50_latency_ms": float(row[4] or 0.0),
+            "p95_latency_ms": float(row[5] or 0.0),
+        }
+
     def fetch_error_groups(self, workspace_id: str) -> list[dict[str, Any]]:
         client = self._client()
         ensure_clickhouse_tables(client)
@@ -216,22 +252,21 @@ class QueryFacade:
 
     def get_dashboard_summary(self, workspace_id: str) -> DashboardSummary:
         if isinstance(self.storage, ClickHouseQueryService):
+            headline = self.storage.fetch_headline_metrics(workspace_id)
             metrics = self.storage.fetch_daily_metrics(workspace_id)
             error_groups = self.storage.fetch_error_groups(workspace_id)
-            if metrics:
-                total_requests = sum(int(row["total_requests"]) for row in metrics)
-                total_errors = sum(int(row["error_count"]) for row in metrics)
-                total_cost = sum(float(row["total_cost"]) for row in metrics)
-                avg_source = [float(row["average_latency_ms"]) for row in metrics]
-                p50_source = [float(row["p50_latency_ms"]) for row in metrics]
-                p95_source = [float(row["p95_latency_ms"]) for row in metrics]
+            if headline["total_requests"] or metrics:
                 return DashboardSummary(
-                    total_requests=total_requests,
-                    average_latency_ms=sum(avg_source) / len(avg_source),
-                    p50_latency_ms=max(p50_source) if p50_source else 0.0,
-                    p95_latency_ms=max(p95_source) if p95_source else 0.0,
-                    error_rate=(total_errors / total_requests) if total_requests else 0.0,
-                    total_cost=round(total_cost, 6),
+                    total_requests=headline["total_requests"],
+                    average_latency_ms=headline["average_latency_ms"],
+                    p50_latency_ms=headline["p50_latency_ms"],
+                    p95_latency_ms=headline["p95_latency_ms"],
+                    error_rate=(
+                        headline["error_count"] / headline["total_requests"]
+                        if headline["total_requests"]
+                        else 0.0
+                    ),
+                    total_cost=round(headline["total_cost"], 6),
                     request_volume=[
                         MetricPoint(
                             timestamp=datetime.combine(row["bucket_date"], datetime.min.time(), timezone.utc),

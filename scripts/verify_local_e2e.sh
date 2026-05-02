@@ -10,6 +10,24 @@ REQUEST_ID="${REQUEST_ID:-verify-$(date +%s)}"
 LOGIN_EMAIL="${LOGIN_EMAIL:-admin@example.com}"
 LOGIN_PASSWORD="${LOGIN_PASSWORD:-changeme}"
 API_KEY="${API_KEY:-demo-ingest-key}"
+VERIFY_WAIT_SECONDS="${VERIFY_WAIT_SECONDS:-15}"
+
+poll_until() {
+  local description="$1"
+  local command="$2"
+  local attempts="${3:-$VERIFY_WAIT_SECONDS}"
+
+  for _ in $(seq 1 "$attempts"); do
+    if eval "$command" >/dev/null 2>&1; then
+      echo "$description"
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for: $description" >&2
+  return 1
+}
 
 echo "Checking Postgres availability..."
 psql "$POSTGRES_DSN" -Atqc 'select 1' >/dev/null
@@ -64,8 +82,20 @@ assert payload["accepted"] is True
 assert "request_id" in payload
 PY
 
+poll_until \
+  "Raw ClickHouse log is visible." \
+  "curl -fsS \"$CLICKHOUSE_HTTP_URL/?query=SELECT%20request_id%20FROM%20llm_logs%20WHERE%20request_id%20%3D%20%27$REQUEST_ID%27%20FORMAT%20TabSeparatedRaw\" | grep -qx \"$REQUEST_ID\""
+
 echo "Running processor..."
 "$ROOT_DIR/scripts/run_local_processor_once.sh" >/dev/null
+
+poll_until \
+  "Gateway logs search reflects the ingested request." \
+  "curl -fsS \"$GATEWAY_URL/v1/logs?search=$REQUEST_ID\" -H \"Authorization: Bearer $TOKEN\" | python3 -c \"import json,sys; payload=json.load(sys.stdin); assert any(item['request_id']=='$REQUEST_ID' for item in payload['items'])\""
+
+poll_until \
+  "Gateway summary reflects processed data." \
+  "curl -fsS \"$GATEWAY_URL/v1/dashboard/summary\" -H \"Authorization: Bearer $TOKEN\" | python3 -c \"import json,sys; payload=json.load(sys.stdin); assert payload['total_requests'] >= 1 and payload['total_cost'] >= 0.003\""
 
 echo "Fetching summary and logs..."
 SUMMARY_RESPONSE="$(curl -fsS "$GATEWAY_URL/v1/dashboard/summary" -H "Authorization: Bearer $TOKEN")"
